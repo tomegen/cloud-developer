@@ -12,7 +12,7 @@ export const config = {
     //open git bash, type "source .profile", go to folder "C:\Users\q516643\Documents\repos\tomegen\cloud-developer\course-02\exercises\udacity-c2-restapi" and npm run dev
   },
   "jwt": {
-    "secret": " "
+    "secret": process.env.JWT_SECRET
   },
   "prod": {
     "username": "",
