@@ -1,31 +1,24 @@
-import * as AWS from "aws-sdk"
-import * as AWSXRay from "aws-xray-sdk"
 import { CreateTodoRequest } from '../requests/CreateTodoRequest'
 import * as uuid from 'uuid'
 import { UpdateTodoRequest } from "../requests/UpdateTodoRequest"
-import { createLogger} from '../utils/logger'
+import { createLogger } from '../utils/logger'
+import { getTodosForUserDao, createTodoDao, updateTodoDao, deleteTodoDao, createAttachmentPresignedUrlDao } from '../dataLayer/dataAccess'
+import {getAttachmentUrl} from '../dataLayer/bucketAccess'
+import { TodoItem} from '../models/TodoItem'
+import {TodoUpdate } from '../models/TodoUpdate'
 
-const XAWS = AWSXRay.captureAWS(AWS)
-const docClient = new XAWS.DynamoDB.DocumentClient()
-const s3 = new XAWS.S3({
-    signatureVersion: 'v4'
-  })
-const logger = createLogger('auth')
+
+const logger = createLogger('todos')
 
 
 export async function getTodosForUser(user: string): Promise<string> {
-    logger.info('getTodosForUser: ', user)
-    const result = await docClient.query({
-        TableName: process.env.TODOS_TABLE,
-        KeyConditionExpression: 'userId = :userId',
-        ExpressionAttributeValues: {
-          ':userId': user
-        }
-    }).promise()
+    logger.info('getTodosForUser: ' + user)
+    
+    const items = await getTodosForUserDao(user)
 
-    const items = result.Items
+    const result = '{ "items": ' + JSON.stringify(items) + '}'
 
-    return '{ "items": ' + JSON.stringify(items) + '}'
+    return result
 }
 
 
@@ -34,30 +27,17 @@ export async function createTodo(userId: string, newTodo: CreateTodoRequest): Pr
 
     const todoId = uuid.v4()
     const createdAt = new Date().toISOString()
-    const tableName = process.env.TODOS_TABLE
     const done = false
     const attachmentUrl = ""
-
-    logger.info("Create Todo for user: ", userId, newTodo.name, newTodo.dueDate)
-
-    /*const cloudwatch = new AWS.CloudWatch()
-    await cloudwatch.putMetricData({
-        MetricData: [
-            {
-                MetricName: 'RequestsCount',
-                Unit: 'Count',
-                Value: 1
-            }
-
-        ],
-        Namespace: 'Udacity/Serverless'
-    }).promise()*/
-
     const name = newTodo.name
     const dueDate = newTodo.dueDate
 
 
-    const item = {
+    logger.info("Create Todo for user: ", userId, name, dueDate)
+
+    
+
+    const item : TodoItem = {
         userId,
         todoId,
         createdAt,
@@ -67,15 +47,10 @@ export async function createTodo(userId: string, newTodo: CreateTodoRequest): Pr
         attachmentUrl
     }
 
-    await docClient
-        .put({
-        TableName: tableName,
-        Item: item
-        })
-        .promise()
+    await createTodoDao(item)
 
     
-    const result = {
+    const res = {
         todoId,
         createdAt,
         name,
@@ -83,48 +58,37 @@ export async function createTodo(userId: string, newTodo: CreateTodoRequest): Pr
         done,
         attachmentUrl
     }
-    return '{ "item": ' + JSON.stringify(result) + '}'
 
+    const result = '{ "item": ' + JSON.stringify(res) + '}'
+
+    return result  
 }
 
 
 export async function updateTodo(user: string, todoId: string, updatedTodo: UpdateTodoRequest): Promise<string> {
 
-    const tableName = process.env.TODOS_TABLE
+    const name = updatedTodo.name
+    const dueDate = updatedTodo.dueDate
+    const done = updatedTodo.done
 
-    docClient.update({
-        TableName: tableName,
-        Key: {
-            "userId": user,
-            "todoId": todoId
-        },
-        ExpressionAttributeNames: {"#N": "name"},
-        UpdateExpression: "set #N = :name, dueDate = :dueDate, done = :done",
-        ExpressionAttributeValues: {
-            ':name': updatedTodo.name,
-            ':dueDate': updatedTodo.dueDate,
-            ':done': updatedTodo.done
-        },
-        ReturnValues: "UPDATED_NEW"
-    }).promise()
+    const updateTodoItem : TodoUpdate = {
+        name, 
+        dueDate, 
+        done
+    }
 
-    return JSON.stringify("")
+    await updateTodoDao(user, todoId, updateTodoItem)
+
+    const result = JSON.stringify("")
+
+    return result
 }
 
 export async function deleteTodo(user: string, todoId: string): Promise<string> {
 
-    const tableName = process.env.TODOS_TABLE
-
     logger.info("delete todo: ", user, todoId)
-    docClient.delete({
-        TableName: tableName,
-        Key: {
-            "userId": user,
-            "todoId": todoId
-        }
-    }).promise()
-
-
+    await deleteTodoDao(user, todoId)
+    
     return ""
 }
 
@@ -133,33 +97,16 @@ export async function createAttachmentPresignedUrl(user: string, todoId: string)
 
     var timeout = parseInt(process.env.SIGNED_URL_EXPIRATION)
     logger.info("Timeout: " + timeout.toString())
-    const bucket = process.env.ATTACHMENT_S3_BUCKET
-    logger.info("create attachment presigned url: ", user, todoId)
-    const attachmentUrl = await s3.getSignedUrl('putObject', {
-        Bucket: bucket,
-        Key: todoId,
-        Expires: timeout
-    })
+
+    const attachmentUrl = await getAttachmentUrl(user, todoId, timeout)
+    
 
     logger.info(attachmentUrl)
 
-    const tableName = process.env.TODOS_TABLE
+    await createAttachmentPresignedUrlDao(user, todoId)
 
-    docClient.update({
-        TableName: tableName,
-        Key: {
-            "userId": user,
-            "todoId": todoId
-        },
-        ExpressionAttributeNames: {"#N": "attachmentUrl"},
-        UpdateExpression: "set #N = :attachmentUrl",
-        ExpressionAttributeValues: {
-            ':attachmentUrl': 'https://' + bucket +'.s3.amazonaws.com/' + todoId
-        },
-        ReturnValues: "UPDATED_NEW"
-    }).promise()
-
-
-    return '{ "uploadUrl": ' + JSON.stringify(attachmentUrl) + '}'
+    const result = '{ "uploadUrl": ' + JSON.stringify(attachmentUrl) + '}'
+    
+    return result
 }
   

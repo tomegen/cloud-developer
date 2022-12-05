@@ -6,6 +6,8 @@ plugins:
   - serverless-webpack
   - serverless-iam-roles-per-function
   - serverless-plugin-tracing
+  - serverless-aws-documentation
+  - serverless-reqvalidator-plugin
 
 provider:
   name: aws
@@ -31,15 +33,20 @@ provider:
     # Enable API Gateway logs
     restApi: true
 
-  iam:
-    role:
-      statements:
-        - Effect: Allow
-          Action:
-            - xray:PutTelemetryRecords
-            - xray:PutTraceSegments
-          Resource: "*"
-
+custom:
+  documentation:
+    api:
+      info:
+        version: v1.0.0
+        title: Udagram API
+        description: Serverless application for todos
+    models: 
+      - name: CreateTodoRequest
+        contentType: application/json
+        schema: ${file(models/create-todo-model.json)}
+      - name: UpdateTodoRequest
+        contentType: application/json
+        schema: ${file(models/update-todo-model.json)}
 
 functions:
 
@@ -55,6 +62,8 @@ functions:
         Action:
         - dynamodb:Query
         - dynamodb:GetItem
+        - xray:PutTelemetryRecords
+        - xray:PutTraceSegments
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
     events:
       - http:
@@ -73,7 +82,8 @@ functions:
       - Effect: Allow
         Action:
         - dynamodb:PutItem
-        - cloudwatch:PutMetricData
+        - xray:PutTelemetryRecords
+        - xray:PutTraceSegments
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
     events:
       - http:
@@ -81,6 +91,12 @@ functions:
           path: todos
           cors: true
           authorizer: Auth
+          reqValidatorName: RequestBodyValidator
+          documentation:
+            summary: Create a new todo
+            description: Create a new todo
+            requestModels: 
+              'application/json': CreateTodoRequest
           request:
             schemas:
               application/json: ${file(models/create-todo-model.json)}
@@ -92,6 +108,8 @@ functions:
       - Effect: Allow
         Action:
         - dynamodb:UpdateItem
+        - xray:PutTelemetryRecords
+        - xray:PutTraceSegments
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
     events:
       - http:
@@ -99,6 +117,12 @@ functions:
           path: todos/{todoId}
           cors: true
           authorizer: Auth
+          reqValidatorName: RequestBodyValidator
+          documentation:
+            summary: Update a todo
+            description: Update a todo
+            requestModels: 
+              'application/json': UpdateTodoRequest
           request:
             schemas:
               application/json: ${file(models/update-todo-model.json)}
@@ -112,6 +136,8 @@ functions:
       - Effect: Allow
         Action:
         - dynamodb:DeleteItem
+        - xray:PutTelemetryRecords
+        - xray:PutTraceSegments
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
     events:
       - http:
@@ -128,11 +154,15 @@ functions:
       - Effect: Allow
         Action:
         - dynamodb:UpdateItem
+        - xray:PutTelemetryRecords
+        - xray:PutTraceSegments
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
       - Effect: Allow
         Action:
           - s3:PutObject
           - s3:GetObject
+          - xray:PutTelemetryRecords
+          - xray:PutTraceSegments
         Resource: arn:aws:s3:::${self:provider.environment.ATTACHMENT_S3_BUCKET}
     events:
       - http:
@@ -142,9 +172,16 @@ functions:
           authorizer: Auth
 resources:
   Resources:
-    # Add necessary AWS resources. You will need at least the following AWS resources
-    # TODO: Fill the properties
-    # Feel free to change the names as you like. 
+
+    RequestBodyValidator:
+      Type: AWS::ApiGateway::RequestValidator
+      Properties: 
+        Name: 'request-body-validator'
+        RestApiId:
+          Ref: ApiGatewayRestApi
+        ValidateRequestBody: true
+        ValidateRequestParameters: false
+
     GatewayResponseDefault4XX:
       Type: AWS::ApiGateway::GatewayResponse
       Properties:
